@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -69,8 +70,10 @@ func (i *Image) setSize(size string) {
 }
 
 func (i *Image) setColors(hexBg, hexFg string) {
-	i.bg = color.RGBA{203, 213, 225, 255}
-	i.fg = color.RGBA{2, 6, 23, 255}
+	// d4d4d4
+	i.bg = color.RGBA{0xD4, 0xD4, 0xD4, 0xFF}
+	// 737373
+	i.fg = color.RGBA{0x73, 0x73, 0x73, 0xFF}
 
 	if len(hexBg) > 0 {
 		if rgbaBg, err := hexToRGBA(hexBg); err == nil {
@@ -86,31 +89,54 @@ func (i *Image) setColors(hexBg, hexFg string) {
 }
 
 func hexToRGBA(hex string) (color.RGBA, error) {
-	// Remove the "#" prefix if present
+	// Remove the '#' symbol if it's included
 	if hex[0] == '#' {
 		hex = hex[1:]
 	}
 
-	// Parse the hex string to integers
-	value, err := strconv.ParseUint(hex, 16, 32)
+	if len(hex) <= 2 || len(hex) >= 9 {
+		return color.RGBA{}, errors.New("Hex should be 3-8 characters.")
+	}
+
+	if len(hex) == 3 {
+		var duplicated strings.Builder
+
+		for _, char := range hex {
+			duplicated.WriteString(string(char))
+			duplicated.WriteString(string(char))
+		}
+
+		hex = duplicated.String()
+	}
+
+	r, err := strconv.ParseUint(hex[0:2], 16, 0)
 	if err != nil {
 		return color.RGBA{}, err
 	}
 
-	// Extract the individual color components
-	r := uint8(value >> 16 & 0xFF)
-	g := uint8(value >> 8 & 0xFF)
-	b := uint8(value & 0xFF)
-
-	// By default, set alpha to 255 (fully opaque)
-	a := uint8(255)
-
-	// If the hex string has an alpha component (8 characters), extract it
-	if len(hex) == 8 {
-		a = uint8(value >> 24 & 0xFF)
+	g, err := strconv.ParseUint(hex[2:4], 16, 0)
+	if err != nil {
+		return color.RGBA{}, err
 	}
 
-	return color.RGBA{R: r, G: g, B: b, A: a}, nil
+	b, err := strconv.ParseUint(hex[4:6], 16, 0)
+	if err != nil {
+		return color.RGBA{}, err
+	}
+
+	// 255 alpha as default
+	a := uint64(255)
+	if len(hex) == 8 {
+		alpha, err := strconv.ParseUint(hex[6:10], 16, 0)
+
+		if err != nil {
+			return color.RGBA{}, err
+		}
+
+		a = alpha
+	}
+
+	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)}, nil
 }
 
 func (i *Image) setText(text string) {
