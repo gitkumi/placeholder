@@ -14,17 +14,25 @@ import (
 	"image/draw"
 	"image/png"
 
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/math/fixed"
+
 	"github.com/gin-gonic/gin"
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
 )
 
 var environment = os.Getenv("ENVIRONMENT")
 
 type Image struct {
-	width  int
-	height int
-	text   string
-	bg     color.RGBA
-	fg     color.RGBA
+	width    int
+	height   int
+	text     string
+	fontSize float64
+	bg       color.RGBA
+	fg       color.RGBA
+	data     *image.RGBA
 }
 
 func (i *Image) setSize(size string) {
@@ -61,17 +69,19 @@ func (i *Image) setSize(size string) {
 }
 
 func (i *Image) setColors(hexBg, hexFg string) {
-	defaultBg := color.RGBA{203, 213, 225, 255}
-	defaultFg := color.RGBA{2, 6, 23, 255}
+	i.bg = color.RGBA{203, 213, 225, 255}
+	i.fg = color.RGBA{2, 6, 23, 255}
 
 	if len(hexBg) > 0 {
-		rgbaBg, err := hexToRGBA(hexBg)
-		i.bg = ternary(err != nil, defaultBg, rgbaBg)
+		if rgbaBg, err := hexToRGBA(hexBg); err == nil {
+			i.bg = rgbaBg
+		}
 	}
 
 	if len(hexFg) > 0 {
-		rgbaFg, err := hexToRGBA(hexFg)
-		i.fg = ternary(err != nil, defaultFg, rgbaFg)
+		if rgbaFg, err := hexToRGBA(hexFg); err == nil {
+			i.fg = rgbaFg
+		}
 	}
 }
 
@@ -111,13 +121,51 @@ func (i *Image) setText(text string) {
 	}
 }
 
-func (i *Image) generate() image.Image {
+func (i *Image) setFont(font string) {
+	i.fontSize = float64(i.height) / 5
+
+	if size, err := strconv.ParseFloat(font, 64); err == nil {
+		i.fontSize = size
+	}
+}
+
+func (i *Image) apply() {
 	upLeft := image.Point{0, 0}
 	lowRight := image.Point{i.width, i.height}
 	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
 	draw.Draw(img, img.Bounds(), &image.Uniform{i.bg}, image.Point{}, draw.Src)
 
-	return img
+	// Add text
+	fontFace, err := freetype.ParseFont(goregular.TTF)
+	if err != nil {
+		panic(err)
+	}
+	fontDrawer := &font.Drawer{
+		Dst: img,
+		Src: &image.Uniform{i.fg},
+		Face: truetype.NewFace(fontFace, &truetype.Options{
+			Size:    i.fontSize,
+			Hinting: font.HintingFull,
+		}),
+	}
+	textBounds, _ := fontDrawer.BoundString(i.text)
+	xPosition := (fixed.I(img.Rect.Max.X) - fontDrawer.MeasureString(i.text)) / 2
+	textHeight := textBounds.Max.Y - textBounds.Min.Y
+	yPosition := fixed.I((img.Rect.Max.Y)-textHeight.Ceil())/2 + fixed.I(textHeight.Ceil())
+	fontDrawer.Dot = fixed.Point26_6{
+		X: xPosition,
+		Y: yPosition,
+	}
+	fontDrawer.DrawString(i.text)
+
+	i.data = img
+}
+
+func (i *Image) generate() ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	err := png.Encode(buffer, i.data)
+
+	return buffer.Bytes(), err
 }
 
 func main() {
@@ -126,19 +174,19 @@ func main() {
 	r.GET("/:size", func(c *gin.Context) {
 		img := &Image{}
 		img.setSize(c.Param("size"))
+		img.setFont(c.Query("fontSize"))
 		img.setText(c.Query("text"))
 		img.setColors(c.Query("bg"), c.Query("fg"))
+		img.apply()
 
-		generated := img.generate()
-		buffer := new(bytes.Buffer)
-		err := png.Encode(buffer, generated)
+		bytes, err := img.generate()
 
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode image"})
 			return
 		}
 
-		c.Data(http.StatusOK, "image/png", buffer.Bytes())
+		c.Data(http.StatusOK, "image/png", bytes)
 	})
 
 	port := ternary(environment == "production", ":8080", ":3000")
