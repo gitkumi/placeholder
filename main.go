@@ -155,7 +155,7 @@ func (i *Image) setFont(font string) {
 	}
 }
 
-func (i *Image) apply() {
+func (i *Image) apply() error {
 	upLeft := image.Point{0, 0}
 	lowRight := image.Point{i.width, i.height}
 	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
@@ -164,7 +164,7 @@ func (i *Image) apply() {
 	// Add text
 	fontFace, err := freetype.ParseFont(goregular.TTF)
 	if err != nil {
-		panic(err)
+		return errors.New("Cannot parse font.")
 	}
 	fontDrawer := &font.Drawer{
 		Dst: img,
@@ -183,8 +183,9 @@ func (i *Image) apply() {
 		Y: yPosition,
 	}
 	fontDrawer.DrawString(i.text)
-
 	i.data = img
+
+	return nil
 }
 
 func (i *Image) generate() ([]byte, error) {
@@ -203,12 +204,17 @@ func main() {
 		img.setFont(c.Query("fontSize"))
 		img.setText(c.Query("text"))
 		img.setColors(c.Query("bg"), c.Query("fg"))
-		img.apply()
+		err := img.apply()
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create an image."})
+			return
+		}
 
 		bytes, err := img.generate()
 
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode image"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode the image."})
 			return
 		}
 
