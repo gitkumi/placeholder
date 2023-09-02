@@ -156,9 +156,7 @@ func (i *Image) setFont(font string) {
 }
 
 func (i *Image) apply() error {
-	upLeft := image.Point{0, 0}
-	lowRight := image.Point{i.width, i.height}
-	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
+	img := image.NewRGBA(image.Rect(0, 0, i.width, i.height))
 	draw.Draw(img, img.Bounds(), &image.Uniform{i.bg}, image.Point{}, draw.Src)
 
 	// Add text
@@ -166,6 +164,7 @@ func (i *Image) apply() error {
 	if err != nil {
 		return errors.New("Cannot parse font.")
 	}
+
 	fontDrawer := &font.Drawer{
 		Dst: img,
 		Src: &image.Uniform{i.fg},
@@ -174,6 +173,7 @@ func (i *Image) apply() error {
 			Hinting: font.HintingFull,
 		}),
 	}
+
 	textBounds, _ := fontDrawer.BoundString(i.text)
 	xPosition := (fixed.I(img.Rect.Max.X) - fontDrawer.MeasureString(i.text)) / 2
 	textHeight := textBounds.Max.Y - textBounds.Min.Y
