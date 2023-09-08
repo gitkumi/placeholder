@@ -212,6 +212,7 @@ func (i *Image) apply() error {
 	for _, line := range lines {
 		textBounds, _ := fontDrawer.BoundString(line)
 		textHeight := textBounds.Max.Y - textBounds.Min.Y
+		textHeight = textHeight + (textHeight / 5)  // add space between lines
 		totalTextHeight += textHeight
 	}
 
@@ -222,7 +223,8 @@ func (i *Image) apply() error {
 	for _, line := range lines {
 		textBounds, _ := fontDrawer.BoundString(line)
 		xPosition := (fixed.I(img.Rect.Max.X) - fontDrawer.MeasureString(line)) / 2
-		textHeight := textBounds.Max.Y - textBounds.Min.Y
+		textHeight := textBounds.Max.Y - textBounds.Min.Y 
+		textHeight = textHeight + (textHeight / 5)  // add space between lines
 
 		// Adjust yPosition for each line
 		yPosition += textHeight
