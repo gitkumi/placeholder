@@ -174,18 +174,71 @@ func (i *Image) apply() error {
 		}),
 	}
 
-	textBounds, _ := fontDrawer.BoundString(i.text)
-	xPosition := (fixed.I(img.Rect.Max.X) - fontDrawer.MeasureString(i.text)) / 2
-	textHeight := textBounds.Max.Y - textBounds.Min.Y
-	yPosition := fixed.I((img.Rect.Max.Y)-textHeight.Ceil())/2 + fixed.I(textHeight.Ceil())
-	fontDrawer.Dot = fixed.Point26_6{
-		X: xPosition,
-		Y: yPosition,
+	lines := wrapText(i.text, fontDrawer, float64(i.width)-30)
+	fmt.Println(lines)
+
+	totalTextHeight := fixed.I(0)
+	for _, line := range lines {
+		textBounds, _ := fontDrawer.BoundString(line)
+		textHeight := textBounds.Max.Y - textBounds.Min.Y
+		totalTextHeight += textHeight
 	}
-	fontDrawer.DrawString(i.text)
+
+	// Calculate the starting yPosition to center the text vertically
+	yPosition := (fixed.I(img.Rect.Max.Y) - totalTextHeight) / 2
+
+	// Draw each line of text
+	for _, line := range lines {
+		textBounds, _ := fontDrawer.BoundString(line)
+		xPosition := (fixed.I(img.Rect.Max.X) - fontDrawer.MeasureString(line)) / 2
+		textHeight := textBounds.Max.Y - textBounds.Min.Y
+
+		// Adjust yPosition for each line
+		yPosition += textHeight
+
+		fontDrawer.Dot = fixed.Point26_6{
+			X: xPosition,
+			Y: yPosition,
+		}
+
+		fontDrawer.DrawString(line)
+	}
+
 	i.data = img
 
 	return nil
+}
+
+func wrapText(text string, drawer *font.Drawer, lineWidth float64) []string {
+	var lines []string
+	var line string
+
+	// Iterate through each character in the input text
+	for _, char := range text {
+		// Calculate the width of the current line if the character is added
+		testLine := line + string(char)
+		width := float64(drawer.MeasureString(testLine) / 64.0)
+
+		// Check if adding the character exceeds the lineWidth
+		if width > lineWidth {
+			// If the current line is not empty, add it to the list of lines
+			if len(line) > 0 {
+				lines = append(lines, line)
+			}
+			// Reset the line to the current character
+			line = string(char)
+		} else {
+			// If adding the character doesn't exceed the line width, append it to the current line
+			line += string(char)
+		}
+	}
+
+	// Append the last line if it's not empty
+	if len(line) > 0 {
+		lines = append(lines, line)
+	}
+
+	return lines
 }
 
 func (i *Image) generate() ([]byte, error) {
