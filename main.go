@@ -4,24 +4,22 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
-	"image"
-	"image/color"
-	"image/draw"
-	"image/png"
-
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/math/fixed"
-
 	"github.com/gin-gonic/gin"
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/math/fixed"
 )
 
 var environment = os.Getenv("ENVIRONMENT")
@@ -36,56 +34,86 @@ type Image struct {
 	data     *image.RGBA
 }
 
+func main() {
+	r := gin.Default()
+	r.GET("/:size", imageHandler)
+	port := ternary(environment == "production", ":8080", ":3000")
+	if err := r.Run(port); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func imageHandler(c *gin.Context) {
+	img := &Image{}
+	img.setSize(c.Param("size"))
+	img.setFont(c.Query("fontSize"))
+	img.setText(c.Query("text"))
+	img.setColors(c.Query("bg"), c.Query("fg"))
+	err := img.apply()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create an image."})
+		return
+	}
+	bytes, err := img.generate()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode the image."})
+		return
+	}
+	c.Data(http.StatusOK, "image/png", bytes)
+}
+
 func (i *Image) setSize(size string) {
-	var width int
-	var height int
-
 	dimensions := strings.Split(size, "x")
+	i.width, i.height = parseDimensions(dimensions)
+}
 
+func parseDimensions(dimensions []string) (int, int) {
+	width, height := 150, 150
 	switch len(dimensions) {
 	case 2:
 		w, err := strconv.Atoi(dimensions[0])
-		width = ternary(err == nil, w, 150)
+		if err == nil {
+			width = w
+		}
 		h, err := strconv.Atoi(dimensions[1])
-		height = ternary(err == nil, h, 150)
+		if err == nil {
+			height = h
+		}
 	case 1:
 		s, err := strconv.Atoi(dimensions[0])
-		width = ternary(err == nil, s, 150)
-		height = ternary(err == nil, s, 150)
-	default:
-		width = 150
-		height = 150
+		if err == nil {
+			width = s
+			height = s
+		}
 	}
-
-	if width > 3000 {
-		width = 3000
-	}
-
-	if height > 3000 {
-		height = 3000
-	}
-
-	i.width = width
-	i.height = height
+	return clamp(width, 150, 3000), clamp(height, 150, 3000)
 }
 
 func (i *Image) setColors(hexBg, hexFg string) {
-	// d4d4d4
-	i.bg = color.RGBA{0xD4, 0xD4, 0xD4, 0xFF}
-	// 737373
-	i.fg = color.RGBA{0x73, 0x73, 0x73, 0xFF}
+	i.bg = parseHexColor(hexBg, color.RGBA{0xD4, 0xD4, 0xD4, 0xFF})
+	i.fg = parseHexColor(hexFg, color.RGBA{0x73, 0x73, 0x73, 0xFF})
+}
 
-	if len(hexBg) > 0 {
-		if rgbaBg, err := hexToRGBA(hexBg); err == nil {
-			i.bg = rgbaBg
+func parseHexColor(hex string, defaultColor color.RGBA) color.RGBA {
+	if len(hex) == 0 {
+		return defaultColor
+	}
+
+	if hex[0] == '#' {
+		hex = hex[1:]
+	}
+
+	if len(hex) >= 3 && len(hex) <= 8 {
+		if len(hex) == 3 {
+			hex = strings.Repeat(hex, 2)
+		}
+
+		if rgba, err := hexToRGBA(hex); err == nil {
+			return rgba
 		}
 	}
 
-	if len(hexFg) > 0 {
-		if rgbaFg, err := hexToRGBA(hexFg); err == nil {
-			i.fg = rgbaFg
-		}
-	}
+	return defaultColor
 }
 
 func hexToRGBA(hex string) (color.RGBA, error) {
@@ -148,11 +176,14 @@ func (i *Image) setText(text string) {
 }
 
 func (i *Image) setFont(font string) {
-	i.fontSize = float64(i.height) / 5
+	i.fontSize = parseFontSize(font, float64(i.height)/5)
+}
 
+func parseFontSize(font string, defaultSize float64) float64 {
 	if size, err := strconv.ParseFloat(font, 64); err == nil {
-		i.fontSize = size
+		return size
 	}
+	return defaultSize
 }
 
 func (i *Image) apply() error {
@@ -175,7 +206,6 @@ func (i *Image) apply() error {
 	}
 
 	lines := wrapText(i.text, fontDrawer, float64(i.width)-30)
-	fmt.Println(lines)
 
 	totalTextHeight := fixed.I(0)
 	for _, line := range lines {
@@ -209,7 +239,7 @@ func (i *Image) apply() error {
 	return nil
 }
 
-func wrapText(text string, drawer *font.Drawer, lineWidth float64) []string {
+func wrapText(text string, drawer *font.Drawer, maxWidth float64) []string {
 	var lines []string
 	var line string
 
@@ -217,10 +247,10 @@ func wrapText(text string, drawer *font.Drawer, lineWidth float64) []string {
 	for _, char := range text {
 		// Calculate the width of the current line if the character is added
 		testLine := line + string(char)
-		width := float64(drawer.MeasureString(testLine) / 64.0)
+		currentWidth := float64(drawer.MeasureString(testLine) / 64.0)
 
 		// Check if adding the character exceeds the lineWidth
-		if width > lineWidth {
+		if currentWidth > maxWidth {
 			// If the current line is not empty, add it to the list of lines
 			if len(line) > 0 {
 				lines = append(lines, line)
@@ -244,47 +274,22 @@ func wrapText(text string, drawer *font.Drawer, lineWidth float64) []string {
 func (i *Image) generate() ([]byte, error) {
 	buffer := new(bytes.Buffer)
 	err := png.Encode(buffer, i.data)
-
 	return buffer.Bytes(), err
 }
 
-func main() {
-	r := gin.Default()
-
-	r.GET("/:size", func(c *gin.Context) {
-		img := &Image{}
-		img.setSize(c.Param("size"))
-		img.setFont(c.Query("fontSize"))
-		img.setText(c.Query("text"))
-		img.setColors(c.Query("bg"), c.Query("fg"))
-		err := img.apply()
-
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create an image."})
-			return
-		}
-
-		bytes, err := img.generate()
-
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode the image."})
-			return
-		}
-
-		c.Data(http.StatusOK, "image/png", bytes)
-	})
-
-	port := ternary(environment == "production", ":8080", ":3000")
-
-	if err := r.Run(port); err != nil {
-		log.Fatal(err)
+func clamp(value, min, max int) int {
+	if value < min {
+		return min
 	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 func ternary[T any](cond bool, left, right T) T {
 	if cond {
 		return left
 	}
-
 	return right
 }
