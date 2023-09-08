@@ -176,7 +176,7 @@ func (i *Image) setText(text string) {
 }
 
 func (i *Image) setFont(font string) {
-	i.fontSize = parseFontSize(font, float64(i.height)/5)
+	i.fontSize = parseFontSize(font, float64(i.width)/5)
 }
 
 func parseFontSize(font string, defaultSize float64) float64 {
@@ -205,7 +205,8 @@ func (i *Image) apply() error {
 		}),
 	}
 
-	lines := wrapText(i.text, fontDrawer, float64(i.width)-30)
+	padding := 30
+	lines := wrapText(i.text, fontDrawer, float64(i.width-padding))
 
 	totalTextHeight := fixed.I(0)
 	for _, line := range lines {
@@ -241,31 +242,34 @@ func (i *Image) apply() error {
 
 func wrapText(text string, drawer *font.Drawer, maxWidth float64) []string {
 	var lines []string
-	var line string
+	var currentLine string
+	var currentWidth float64
 
-	// Iterate through each character in the input text
-	for _, char := range text {
-		// Calculate the width of the current line if the character is added
-		testLine := line + string(char)
-		currentWidth := float64(drawer.MeasureString(testLine) / 64.0)
+	words := strings.Fields(text)
 
-		// Check if adding the character exceeds the lineWidth
+	for _, word := range words {
+		testLine := currentLine
+		if len(testLine) > 0 {
+			testLine += " "
+		}
+		testLine += word
+		currentWidth = float64(drawer.MeasureString(testLine) / 64.0)
+
 		if currentWidth > maxWidth {
-			// If the current line is not empty, add it to the list of lines
-			if len(line) > 0 {
-				lines = append(lines, line)
+			if len(currentLine) > 0 {
+				lines = append(lines, currentLine)
 			}
-			// Reset the line to the current character
-			line = string(char)
+			currentLine = word
 		} else {
-			// If adding the character doesn't exceed the line width, append it to the current line
-			line += string(char)
+			if len(currentLine) > 0 {
+				currentLine += " "
+			}
+			currentLine += word
 		}
 	}
 
-	// Append the last line if it's not empty
-	if len(line) > 0 {
-		lines = append(lines, line)
+	if len(currentLine) > 0 {
+		lines = append(lines, currentLine)
 	}
 
 	return lines
